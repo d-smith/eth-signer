@@ -154,6 +154,41 @@ func All(id party.ID, ids party.IDSlice, threshold int, n *test.Network, wg *syn
 	return nil
 }
 
+func CreateKeyShares(id party.ID, ids party.IDSlice, threshold int, n *test.Network, wg *sync.WaitGroup, pl *pool.Pool) error {
+	defer wg.Done()
+
+	// CMP KEYGEN
+
+	if configs[id] == nil {
+		fmt.Println("cmp keygen")
+		config, err := CMPKeygen(id, ids, threshold, n, pl)
+		if err != nil {
+			return err
+		}
+
+		configs[id] = config
+	}
+
+	return nil
+}
+
+type partyFunc func(party.ID, party.IDSlice, int, *test.Network, *sync.WaitGroup, *pool.Pool) error
+
+func runFuncForAllParties(fn partyFunc, wg *sync.WaitGroup, ids party.IDSlice, threshold int, n *test.Network) {
+
+	for _, id := range ids {
+		wg.Add(1)
+		go func(id party.ID) {
+			pl := pool.NewPool(0)
+			defer pl.TearDown()
+			if err := fn(id, ids, threshold, n, wg, pl); err != nil {
+				fmt.Println(err)
+			}
+		}(id)
+	}
+	wg.Wait()
+}
+
 func main() {
 	configs = make(map[party.ID]*cmp.Config)
 	ids := party.IDSlice{"a", "b", "c"}
@@ -161,29 +196,10 @@ func main() {
 
 	net := test.NewNetwork(ids)
 
-	// Can we reuse the key group config?
+	// Create the key shares
 	var wg sync.WaitGroup
-	for _, id := range ids {
-		wg.Add(1)
-		go func(id party.ID) {
-			pl := pool.NewPool(0)
-			defer pl.TearDown()
-			if err := All(id, ids, threshold, net, &wg, pl); err != nil {
-				fmt.Println(err)
-			}
-		}(id)
-	}
-	wg.Wait()
 
-	for _, id := range ids {
-		wg.Add(1)
-		go func(id party.ID) {
-			pl := pool.NewPool(0)
-			defer pl.TearDown()
-			if err := All(id, ids, threshold, net, &wg, pl); err != nil {
-				fmt.Println(err)
-			}
-		}(id)
-	}
-	wg.Wait()
+	runFuncForAllParties(CreateKeyShares, &wg, ids, threshold, net)
+
+	runFuncForAllParties(All, &wg, ids, threshold, net)
 }
