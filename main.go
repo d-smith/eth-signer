@@ -17,9 +17,12 @@ import (
 	"github.com/taurusgroup/multi-party-sig/pkg/protocol"
 	"github.com/taurusgroup/multi-party-sig/protocols/cmp"
 	"golang.org/x/crypto/sha3"
+
+	"github.com/manifoldco/promptui"
 )
 
 var configs map[party.ID]*cmp.Config
+var walletAddress common.Address
 
 func PublicKeyBytesToAddress(publicKey []byte) common.Address {
 	var buf []byte
@@ -147,8 +150,8 @@ func All(id party.ID, ids party.IDSlice, threshold int, n *test.Network, wg *syn
 
 		// Grab the address as the last 20 bytes of the public key
 		// from the sig
-		addr := PublicKeyBytesToAddress(sigPublicKey)
-		fmt.Println("Address from sig public key", addr)
+		walletAddress = PublicKeyBytesToAddress(sigPublicKey)
+		fmt.Println("Address from sig public key", walletAddress)
 	}
 
 	return nil
@@ -202,4 +205,24 @@ func main() {
 	runFuncForAllParties(CreateKeyShares, &wg, ids, threshold, net)
 
 	runFuncForAllParties(All, &wg, ids, threshold, net)
+
+	// Prompt for send of eth
+	prompt := promptui.Select{
+		Label: "Did you send ETH to " + walletAddress.String(),
+		Items: []string{"yep", "nope"},
+	}
+
+	_, result, err := prompt.Run()
+
+	if err != nil {
+		fmt.Printf("Prompt failed %v\n", err)
+		return
+	}
+
+	if result == "nope" {
+		fmt.Println("you are dead to me")
+		return
+	}
+
+	fmt.Println("we'll see about that...")
 }
