@@ -1,15 +1,19 @@
 package main
 
 import (
+	"context"
 	"encoding/hex"
 	"errors"
 	"eth-signer/test"
 	"fmt"
 	"log"
+	"math/big"
 	"sync"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/taurusgroup/multi-party-sig/pkg/ecdsa"
 	"github.com/taurusgroup/multi-party-sig/pkg/math/curve"
 	"github.com/taurusgroup/multi-party-sig/pkg/party"
@@ -23,6 +27,7 @@ import (
 
 var configs map[party.ID]*cmp.Config
 var walletAddress common.Address
+var ethClient ethclient.Client
 
 func PublicKeyBytesToAddress(publicKey []byte) common.Address {
 	var buf []byte
@@ -193,6 +198,12 @@ func runFuncForAllParties(fn partyFunc, wg *sync.WaitGroup, ids party.IDSlice, t
 }
 
 func main() {
+	ethClient, err := ethclient.Dial("http://localhost:8545")
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
 	configs = make(map[party.ID]*cmp.Config)
 	ids := party.IDSlice{"a", "b", "c"}
 	threshold := 2
@@ -206,9 +217,8 @@ func main() {
 
 	runFuncForAllParties(All, &wg, ids, threshold, net)
 
-	// Prompt for send of eth
 	prompt := promptui.Select{
-		Label: "Did you send ETH to " + walletAddress.String(),
+		Label: "Did you send more than 1 ETH to " + walletAddress.String(),
 		Items: []string{"yep", "nope"},
 	}
 
@@ -225,4 +235,53 @@ func main() {
 	}
 
 	fmt.Println("we'll see about that...")
+	balance, err := ethClient.BalanceAt(context.Background(), walletAddress, nil)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	var minEth big.Int
+	minEth.SetString("1", 10)
+	if balance.Cmp(&minEth) < 0 {
+		fmt.Println("you are dead to me")
+		return
+	}
+
+	// Prompt for send of eth
+	fmt.Println("Ok... where should I send some ETH?")
+	addressPrompt := promptui.Prompt{
+		Label: "Address",
+	}
+
+	destAddr, err := addressPrompt.Run()
+
+	if err != nil {
+		fmt.Printf("Prompt failed %v\n", err)
+		return
+	}
+
+	fmt.Println("Allright sending to", destAddr)
+
+	nonce, err := ethClient.PendingNonceAt(context.Background(), walletAddress)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	value := big.NewInt(1000000000000000000) // in wei (1 eth)
+	gasLimit := uint64(21000)                // in units
+	gasPrice, err := ethClient.SuggestGasPrice(context.Background())
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	toAddress := common.HexToAddress(destAddr)
+	var data []byte
+	tx := types.NewTransaction(nonce, toAddress, value, gasLimit, gasPrice, data)
+
+	chainId := big.NewInt(1337) // TODO what's the right way to obtain this dynamically?
+	signer := types.NewEIP155Signer(chainId)
+
+	hash := signer.Hash(tx)
+	fmt.Println("hash to sign is", hash)
+
 }

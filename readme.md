@@ -42,7 +42,7 @@ truffle console --url http://127.0.0.1:8545
 
 let balance = await web3.eth.getBalance('0xcb95df7f187b374947E499f6C0047E76e0812468')
 
- let txHash = await web3.eth.sendTransaction({from: accounts[0], to: '0xcb95df7f187b374947E499f6C0047E76e0812468', value: 10 });
+ let txHash = await web3.eth.sendTransaction({from: accounts[0], to: '0x43f336E88D21C912c57e5C44bD52eb1d5CD204f2', value: 10 });
 
 ```
 
@@ -65,4 +65,3 @@ npm install -g truffle
 truffle init
 truffle console --url http://127.0.0.1:8545
  ```
- 
