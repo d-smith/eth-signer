@@ -14,6 +14,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/ethereum/go-ethereum/params"
 	"github.com/taurusgroup/multi-party-sig/pkg/ecdsa"
 	"github.com/taurusgroup/multi-party-sig/pkg/math/curve"
 	"github.com/taurusgroup/multi-party-sig/pkg/party"
@@ -28,6 +29,7 @@ import (
 var configs map[party.ID]*cmp.Config
 var walletAddress common.Address
 var ethClient ethclient.Client
+var signedMessage []byte
 
 func PublicKeyBytesToAddress(publicKey []byte) common.Address {
 	var buf []byte
@@ -162,6 +164,65 @@ func All(id party.ID, ids party.IDSlice, threshold int, n *test.Network, wg *syn
 	return nil
 }
 
+func Sign(id party.ID, ids party.IDSlice, threshold int, n *test.Network, wg *sync.WaitGroup, pl *pool.Pool) error {
+	defer wg.Done()
+
+	// CMP KEYGEN
+
+	if configs[id] == nil {
+		fmt.Println("cmp keygen")
+		config, err := CMPKeygen(id, ids, threshold, n, pl)
+		if err != nil {
+			return err
+		}
+
+		configs[id] = config
+	}
+	keygenConfig := configs[id]
+
+	signers := ids[:threshold+1]
+	if !signers.Contains(id) {
+		n.Quit(id)
+		return nil
+	}
+
+	// CMP PRESIGN
+	fmt.Println("cmp presign")
+	preSignature, err := CMPPreSign(keygenConfig, signers, n, pl)
+	if err != nil {
+		return nil
+	}
+
+	messageToSign := []byte("hello")
+	hash := crypto.Keccak256Hash(messageToSign)
+
+	// CMP PRESIGN ONLINE
+	fmt.Println("cmp presign online")
+	signature, err := CMPPreSignOnline(keygenConfig, preSignature, hash.Bytes(), n, pl)
+	if err != nil {
+		return err
+	}
+
+	sigEth, err := signature.SigEthereum()
+	if err != nil {
+		return err
+	}
+
+	signedMessage = sigEth
+
+	sigPublicKey, err := crypto.Ecrecover(hash.Bytes(), sigEth)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// Grab the address as the last 20 bytes of the public key
+	// from the sig
+	walletAddress = PublicKeyBytesToAddress(sigPublicKey)
+	fmt.Println("Address from signed message public key", id, "=>", walletAddress)
+
+	return nil
+}
+
 func CreateKeyShares(id party.ID, ids party.IDSlice, threshold int, n *test.Network, wg *sync.WaitGroup, pl *pool.Pool) error {
 	defer wg.Done()
 
@@ -239,10 +300,13 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	fmt.Println("Balance", balance)
 
 	var minEth big.Int
 	minEth.SetString("1", 10)
-	if balance.Cmp(&minEth) < 0 {
+	minInWei := new(big.Int).Mul(&minEth, big.NewInt(params.Ether))
+	fmt.Println(minInWei.String())
+	if balance.Cmp(minInWei) < 0 {
 		fmt.Println("you are dead to me")
 		return
 	}
@@ -267,12 +331,16 @@ func main() {
 		log.Fatal(err)
 	}
 
+	fmt.Println("Nonce", nonce)
+
 	value := big.NewInt(1000000000000000000) // in wei (1 eth)
 	gasLimit := uint64(21000)                // in units
 	gasPrice, err := ethClient.SuggestGasPrice(context.Background())
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	fmt.Println("gas price", gasPrice)
 
 	toAddress := common.HexToAddress(destAddr)
 	var data []byte
@@ -283,5 +351,21 @@ func main() {
 
 	hash := signer.Hash(tx)
 	fmt.Println("hash to sign is", hash)
+
+	runFuncForAllParties(Sign, &wg, ids, threshold, net)
+
+	fmt.Printf("%+v", tx)
+
+	// Send txn...
+	fmt.Println("create signed txn")
+	signedTx, err := tx.WithSignature(signer, signedMessage)
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println("send txn")
+	err = ethClient.SendTransaction(context.Background(), signedTx)
+	if err != nil {
+		log.Fatal(err)
+	}
 
 }
