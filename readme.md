@@ -42,7 +42,7 @@ truffle console --url http://127.0.0.1:8545
 
 let balance = await web3.eth.getBalance('0xcb95df7f187b374947E499f6C0047E76e0812468')
 
- let txHash = await web3.eth.sendTransaction({from: accounts[0], to: '0x43f336E88D21C912c57e5C44bD52eb1d5CD204f2', value: web3.toWei(10,"ether") });
+ let txHash = await web3.eth.sendTransaction({from: accounts[0], to: '0x58F259c88eD279d5f53717AB866748ecD058097C', value: web3.utils.toWei('10',"ether") });
 ```
 
 1st experiment - code will have to mainstate of key shares 

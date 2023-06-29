@@ -164,7 +164,7 @@ func All(id party.ID, ids party.IDSlice, threshold int, n *test.Network, wg *syn
 	return nil
 }
 
-func Sign(id party.ID, ids party.IDSlice, threshold int, n *test.Network, wg *sync.WaitGroup, pl *pool.Pool) error {
+func Sign(msg []byte, id party.ID, ids party.IDSlice, threshold int, n *test.Network, wg *sync.WaitGroup, pl *pool.Pool) error {
 	defer wg.Done()
 
 	// CMP KEYGEN
@@ -193,12 +193,9 @@ func Sign(id party.ID, ids party.IDSlice, threshold int, n *test.Network, wg *sy
 		return nil
 	}
 
-	messageToSign := []byte("hello")
-	hash := crypto.Keccak256Hash(messageToSign)
-
 	// CMP PRESIGN ONLINE
 	fmt.Println("cmp presign online")
-	signature, err := CMPPreSignOnline(keygenConfig, preSignature, hash.Bytes(), n, pl)
+	signature, err := CMPPreSignOnline(keygenConfig, preSignature, msg, n, pl)
 	if err != nil {
 		return err
 	}
@@ -210,7 +207,7 @@ func Sign(id party.ID, ids party.IDSlice, threshold int, n *test.Network, wg *sy
 
 	signedMessage = sigEth
 
-	sigPublicKey, err := crypto.Ecrecover(hash.Bytes(), sigEth)
+	sigPublicKey, err := crypto.Ecrecover(msg, sigEth)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -238,6 +235,8 @@ func CreateKeyShares(id party.ID, ids party.IDSlice, threshold int, n *test.Netw
 		configs[id] = config
 	}
 
+	fmt.Println("key share for id", id, configs[id].ECDSA)
+
 	return nil
 }
 
@@ -251,6 +250,23 @@ func runFuncForAllParties(fn partyFunc, wg *sync.WaitGroup, ids party.IDSlice, t
 			pl := pool.NewPool(0)
 			defer pl.TearDown()
 			if err := fn(id, ids, threshold, n, wg, pl); err != nil {
+				fmt.Println(err)
+			}
+		}(id)
+	}
+	wg.Wait()
+}
+
+type signPartyFunc func([]byte, party.ID, party.IDSlice, int, *test.Network, *sync.WaitGroup, *pool.Pool) error
+
+func runSignFuncForAllParties(fn signPartyFunc, msg []byte, wg *sync.WaitGroup, ids party.IDSlice, threshold int, n *test.Network) {
+
+	for _, id := range ids {
+		wg.Add(1)
+		go func(id party.ID) {
+			pl := pool.NewPool(0)
+			defer pl.TearDown()
+			if err := fn(msg, id, ids, threshold, n, wg, pl); err != nil {
 				fmt.Println(err)
 			}
 		}(id)
@@ -324,7 +340,16 @@ func main() {
 		return
 	}
 
+	toAddress := common.HexToAddress(destAddr)
+
 	fmt.Println("Allright sending to", destAddr)
+
+	fmt.Println("Let's check the dest balance before...")
+	balance, err = ethClient.BalanceAt(context.Background(), toAddress, nil)
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println("Balance", balance)
 
 	nonce, err := ethClient.PendingNonceAt(context.Background(), walletAddress)
 	if err != nil {
@@ -342,7 +367,6 @@ func main() {
 
 	fmt.Println("gas price", gasPrice)
 
-	toAddress := common.HexToAddress(destAddr)
 	var data []byte
 	tx := types.NewTransaction(nonce, toAddress, value, gasLimit, gasPrice, data)
 
@@ -352,7 +376,7 @@ func main() {
 	hash := signer.Hash(tx)
 	fmt.Println("hash to sign is", hash)
 
-	runFuncForAllParties(Sign, &wg, ids, threshold, net)
+	runSignFuncForAllParties(Sign, hash.Bytes(), &wg, ids, threshold, net)
 
 	fmt.Printf("%+v", tx)
 
@@ -367,5 +391,12 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	fmt.Println("Let's check the dest balance after...")
+	balance, err = ethClient.BalanceAt(context.Background(), toAddress, nil)
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println("Balance", balance)
 
 }
